@@ -54,13 +54,23 @@ class CommandLineExecutor(object):
 
         return -1
 
+    def executeFromStrings(self, strings):
+        return self.execute(CommandParameter().setFromStrings(strings))
+
 class CommandListReader(object):
-    def read(self, filename, encoding='shift-jis'):
+    def readFromFile(self, filename, encoding='shift-jis'):
         commandParameters = []
 
         with open(filename, mode='r', encoding=encoding) as f:
-            for readLine in f.readlines():
-                commandParameters.append(CommandParameter().setFromStrings(readLine))
+            return self.readFromStringList(f.readlines())
+
+        return commandParameters
+
+    def readFromStringList(self, stringList):
+        commandParameters = []
+
+        for string in stringList:
+            commandParameters.append(CommandParameter().setFromStrings(string))
 
         return commandParameters
 
@@ -81,7 +91,10 @@ class __CommandListExecutor(CommandLineExecutor):
         self.lock.release()
 
     def executeFromFile(self, filename):
-        return self.execute(CommandListReader().read(filename))
+        return self.execute(CommandListReader().readFromFile(filename))
+
+    def executeFromStringList(self, stringList):
+        return self.execute(CommandListReader().readFromStringList(stringList))
 
     def __sortDictionary(self, dictionary, sortByKey=True, reverse=False):
         return sorted(dictionary.items(), key=lambda item:item[0 if sortByKey == True else 1], reverse=reverse)
@@ -115,7 +128,7 @@ class CommandListParallelExecutor(__CommandListExecutor):
         if not commandParameters:
             raise ValueError("Command parameters not set.")
 
-        self._numOfcommandParameters = len(commandParameters)
+        self.numOfcommandParameters = len(commandParameters)
 
         with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
             allFutureResults = list(executor.map(super().execute, commandParameters))
@@ -150,7 +163,7 @@ class CommandListSerialExecutor(__CommandListExecutor):
         if not commandParameters:
             raise ValueError("Command parameters not set.")
 
-        self._numOfcommandParameters = len(commandParameters)
+        self.numOfcommandParameters = len(commandParameters)
 
         for index, parameter in enumerate(commandParameters):
             returnCode = super().execute(parameter)
@@ -207,15 +220,22 @@ if __name__ == "__main__":
     finalResults = CommandListParallelExecutor().executeFromFile(filename)
     print(finalResults)
 
-    # Redundant way of writing.
-    parameters = CommandListReader().read(filename)
+    # You can execute command list from string list
+    parameterList = [
+        "echo hoge",
+        "timeout /t 3 /nobreak > nul;1;5"
+    ]
 
-    print("Execute command list serial from file(redundant).")
-    finalResults = CommandListSerialExecutor().execute(parameters)
+    print("Execute command line from strings.")
+    finalResults = CommandLineExecutor().executeFromStrings(parameterList[0])
     print(finalResults)
 
-    print("Execute command list parallel from file(redundant).")
-    finalResults = CommandListParallelExecutor().execute(parameters)
+    print("Execute command list serial from string list.")
+    finalResults = CommandListSerialExecutor().executeFromStringList(parameterList)
+    print(finalResults)
+
+    print("Execute command list parallel from string list.")
+    finalResults = CommandListParallelExecutor().executeFromStringList(parameterList)
     print(finalResults)
 
     exit(0)
