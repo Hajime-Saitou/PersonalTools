@@ -77,18 +77,26 @@ class CommandListReader(object):
 class __CommandListExecutor(CommandLineExecutor):
     def __init__(self):
         self.numOfcommandParameters = 0
-        self.allResults = {0: 0}
+        self._allResults = { 0: 0 }
+        self._allResultsDetails = {}
         self.lock = threading.Lock()
 
-    def _incrementAllResults(self,  key):
+    @property
+    def allResultsDetails(self):
+        return self._allResultsDetails
+
+    @property
+    def allResults(self):
+        return self._allResults
+
+    def execute(self, parameter):
+        returnCode = super().execute(parameter)
+        commandName = os.path.basename(parameter.commandLine.split(" ")[0])
         self.lock.acquire()
-
-        if key not in self.allResults:
-            self.allResults[key] = 1
-        else:
-            self.allResults[key] = self.allResults[key] + 1
-
+        self._allResultsDetails[commandName] = returnCode
         self.lock.release()
+
+        return returnCode
 
     def executeFromFile(self, filename):
         return self.execute(CommandListReader().readFromFile(filename))
@@ -99,21 +107,26 @@ class __CommandListExecutor(CommandLineExecutor):
     def __sortDictionary(self, dictionary, sortByKey=True, reverse=False):
         return sorted(dictionary.items(), key=lambda item:item[0 if sortByKey == True else 1], reverse=reverse)
 
-    def _tallyingAllResults(self):
-        sortedByKeyAsc = self.__sortDictionary(self.allResults)
-        print(f"All results: {sortedByKeyAsc}")
+    def _incrementDictionary(self, dictionary, key):
+        if key not in dictionary:
+            dictionary[key] = 1
+        else:
+            dictionary[key] = dictionary[key] + 1
 
-        if self.allResults[0] == self.numOfcommandParameters:
+    def _tallyingAllResults(self, allResults):
+        self._allResults = self.__sortDictionary(allResults)
+
+        if allResults[0] == self.numOfcommandParameters:
             return 0
 
-        del self.allResults[0]
+        del allResults[0]
 
         # If key value has non zero value , sort a dict by item value(this is counter).
-        sortedByValueDesc = self.__sortDictionary(self.allResults, sortByKey=False, reverse=True)
+        sortedByValueDesc = self.__sortDictionary(allResults, sortByKey=False, reverse=True)
         topOfCount = next(iter(sortedByValueDesc))[1]
 
         # If item value is not unique, pick up more highly key value.
-        sortedByKeyDesc = self.__sortDictionary(self.allResults, reverse=True)
+        sortedByKeyDesc = self.__sortDictionary(allResults, reverse=True)
         for key, value in sortedByKeyDesc:
             if value == topOfCount:
                 return key
@@ -121,7 +134,8 @@ class __CommandListExecutor(CommandLineExecutor):
 class CommandListParallelExecutor(__CommandListExecutor):
     def __init__(self):
         self.numOfcommandParameters = 0
-        self.allResults = {0: 0}
+        self._allResults = { 0: 0 }
+        self._allResultsDetails = {}
         self.lock = threading.Lock()
 
     def execute(self, commandParameters):
@@ -129,20 +143,23 @@ class CommandListParallelExecutor(__CommandListExecutor):
             raise ValueError("Command parameters not set.")
 
         self.numOfcommandParameters = len(commandParameters)
+        self._allResults = { 0: 0 }
 
         with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
             allFutureResults = list(executor.map(super().execute, commandParameters))
             executor.shutdown()
 
+        self._allResults = { 0: 0 }
         for futureResults in list(allFutureResults):
-            self._incrementAllResults(futureResults)
+            self._incrementDictionary(self._allResults, futureResults)
 
-        return self._tallyingAllResults()
+        return self._tallyingAllResults(self._allResults)
 
 class CommandListSerialExecutor(__CommandListExecutor):
     def __init__(self):
         self.numOfcommandParameters = 0
-        self.allResults = {0: 0}
+        self._allResults = { 0: 0 }
+        self._allResultsDetails = {}
         self.hasSetThreshouldOfError = False
         self._thresholdOfError = 0
         self.lock = threading.Lock()
@@ -165,14 +182,15 @@ class CommandListSerialExecutor(__CommandListExecutor):
 
         self.numOfcommandParameters = len(commandParameters)
 
+        self._allResults = { 0: 0 }
         for index, parameter in enumerate(commandParameters):
             returnCode = super().execute(parameter)
-            self._incrementAllResults(returnCode)
+            self._incrementDictionary(self._allResults, returnCode)
             if self.__isDoStopAtError(returnCode):
                 print(f"Stop at {index + 1}, return code: {returnCode}, threshold: {self._thresholdOfError}.")
                 break
 
-        return self._tallyingAllResults()
+        return self._tallyingAllResults(self._allResults)
 
     def __isDoStopAtError(self, returnCode):
         if self.hasSetThreshouldOfError == False:
@@ -188,35 +206,35 @@ if __name__ == "__main__":
     ]
 
     # Execute command line single.
-    print("Execute command line single.")
+    print("--- Execute command line single. ---")
     finalResults = CommandLineExecutor().execute(parameters[0])
     print(finalResults)
 
     # Execute command list serial.
-    print("Execute command list serial.")
+    print("--- Execute command list serial. ---")
     finalResults = CommandListSerialExecutor().execute(parameters)
     print(finalResults)
 
     # If you set threshold of error, you can been break a command line at error occur or timed out.
-    print("Execute command list serial with thresold.")
+    print("--- Execute command list serial with thresold. ---")
     executor = CommandListSerialExecutor()
     executor.thresholdOfError = 5
     finalResults = executor.execute(parameters)
     print(finalResults)
 
     # Execute command list parallel.
-    print("Execute command list parallel.")
+    print("--- Execute command list parallel. ---")
     finalResults = CommandListParallelExecutor().execute(parameters)
     print(finalResults)
 
     # You can execute command list from file.
     filename = os.path.join("c:\\temp", "commandList.txt")
 
-    print("Execute command list serial from file.")
+    print("--- Execute command list serial from file. ---")
     finalResults = CommandListSerialExecutor().executeFromFile(filename)
     print(finalResults)
 
-    print("Execute command list parallel from file.")
+    print("--- Execute command list parallel from file. ---")
     finalResults = CommandListParallelExecutor().executeFromFile(filename)
     print(finalResults)
 
@@ -226,16 +244,33 @@ if __name__ == "__main__":
         "timeout /t 3 /nobreak > nul;1;5"
     ]
 
-    print("Execute command line from strings.")
+    print("--- Execute command line from strings. ---")
     finalResults = CommandLineExecutor().executeFromStrings(parameterList[0])
     print(finalResults)
 
-    print("Execute command list serial from string list.")
+    print("--- Execute command list serial from string list. ---")
     finalResults = CommandListSerialExecutor().executeFromStringList(parameterList)
     print(finalResults)
 
-    print("Execute command list parallel from string list.")
+    print("--- Execute command list parallel from string list. ---")
     finalResults = CommandListParallelExecutor().executeFromStringList(parameterList)
     print(finalResults)
+
+    # Execute command list serial.
+    print("--- get all results summaries and details after execute command list serial. ---")
+    clse = CommandListSerialExecutor()
+    finalResults = clse.execute(parameters)
+    print(finalResults)
+    print(clse.allResults)
+    print(clse.allResultsDetails)
+
+    # Execute command list parallel.
+    print("--- get all results summaries and details after execute command list parallel. ---")
+    clpe = CommandListParallelExecutor()
+    finalResults = clpe.execute(parameters)
+    print(finalResults)
+    print(clpe.allResults)
+    print(clpe.allResultsDetails)
+
 
     exit(0)
