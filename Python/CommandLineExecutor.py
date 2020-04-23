@@ -2,52 +2,65 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import multiprocessing
+import threading
+import time
 
 class CommandParameter(object):
-    def __init__(self, commandLine, timeout, retry):
-        if not commandLine:
-            raise ValueError("Command Line is blank.")
-
-        if timeout < 1:
-            raise ValueError("Set timeout value to greater than or equals 1.")
-
-        if retry < 1:
-            raise ValueError("Set number of retries to greater than or equals 1.")
-
+    def set(self, commandLine, timeout=60, retry=3, backoff=0, delay=0):
         self.commandLine = commandLine
         self.timeout = timeout
         self.retry = retry
+        self.delay = delay
+        self.backoff = backoff
+
+        self.validate()
+
+        return self
+
+    def setFromStrings(self, strings, separator=";"):
+        commandLine, timeout, retry, backoff, delay = (strings.strip() + ";;;;").split(separator)[0:5]
+        return self.set(commandLine, int(timeout or "60"), int(retry or "3"), int(backoff or "0"), int(delay or "0"))
+
+    def validate(self):
+        if not self.commandLine:
+            raise ValueError("Command Line is blank.")
+
+        if self.timeout < 1:
+            raise ValueError("Set timeout value to greater than or equals 1.")
+
+        if self.retry < 1:
+            raise ValueError("Set number of retries to greater than or equals 1.")
+
+        if self.delay < 0:
+            raise ValueError("Set delay to positive value.")
+
+        if self.backoff < 0:
+            raise ValueError("Set backoff to positive value.")
 
 class CommandLineExecutor(object):
     def execute(self, parameter):
-        for trialCounter in range(parameter.retry):
+        for trialCounter in range(1, parameter.retry + 1):
             try:
                 process = subprocess.Popen(parameter.commandLine, shell=True, text=True)
                 process.communicate(timeout=parameter.timeout)
             except subprocess.TimeoutExpired:
-                print(f"Timed out({trialCounter + 1}/{parameter.retry}): {parameter.commandLine}")
+                print(f"Timed out({trialCounter}/{parameter.retry}): {parameter.commandLine}")
                 process.terminate()
+
+                # Exponential backoff
+                time.sleep(parameter.backoff ** trialCounter + parameter.delay)
             else:
                 return process.returncode
 
         return -1
 
 class CommandListReader(object):
-    def __init__(self, separator = ";"):
-        self.separator = separator
-
     def read(self, filename, encoding='shift-jis'):
         commandParameters = []
 
         with open(filename, mode='r', encoding=encoding) as f:
-            for lineNo, readLine in enumerate(f.readlines()):
-                readLine = readLine.strip()
-                if not readLine:
-                    print(f"Line {lineNo + 1}: Command line is blank.")
-                    continue
-
-                commandLine, timeout, retry = readLine.split(self.separator)
-                commandParameters.append(CommandParameter(commandLine, int(timeout), int(retry)))
+            for readLine in f.readlines():
+                commandParameters.append(CommandParameter().setFromStrings(readLine))
 
         return commandParameters
 
@@ -55,12 +68,17 @@ class __CommandListExecutor(CommandLineExecutor):
     def __init__(self):
         self.numOfcommandParameters = 0
         self.allResults = {0: 0}
+        self.lock = threading.Lock()
 
     def _incrementAllResults(self,  key):
+        self.lock.acquire()
+
         if key not in self.allResults:
             self.allResults[key] = 1
         else:
             self.allResults[key] = self.allResults[key] + 1
+
+        self.lock.release()
 
     def executeFromFile(self, filename):
         return self.execute(CommandListReader().read(filename))
@@ -91,6 +109,7 @@ class CommandListParallelExecutor(__CommandListExecutor):
     def __init__(self):
         self.numOfcommandParameters = 0
         self.allResults = {0: 0}
+        self.lock = threading.Lock()
 
     def execute(self, commandParameters):
         if not commandParameters:
@@ -113,6 +132,7 @@ class CommandListSerialExecutor(__CommandListExecutor):
         self.allResults = {0: 0}
         self.hasSetThreshouldOfError = False
         self._thresholdOfError = 0
+        self.lock = threading.Lock()
 
     @property
     def thresholdOfError(self, value):
@@ -150,8 +170,8 @@ class CommandListSerialExecutor(__CommandListExecutor):
 if __name__ == "__main__":
     # Code exsamples
     parameters = [
-        CommandParameter("echo hoge", 10, 3),
-        CommandParameter("timeout /t 3 /nobreak > nul", 1, 5)
+        CommandParameter().set("echo hoge", 10, 3),
+        CommandParameter().setFromStrings("timeout /t 3 /nobreak > nul;1;5")
     ]
 
     # Execute command line single.
