@@ -6,6 +6,21 @@ import threading
 import time
 
 class CommandParameter(object):
+    def __init__(self):
+        self.separatorRepeatCount = 4
+        self.separator = ";"
+
+    @property
+    def separator(self):
+        return self._separator
+
+    @separator.setter
+    def separator(self, separator):
+        self._separator = separator
+        self.repeatedSeparator = ""
+        for _ in range(self.separatorRepeatCount):
+            self.repeatedSeparator += self._separator
+
     def set(self, commandLine, timeout=60, retry=3, backoff=0, delay=0):
         self.commandLine = commandLine
         self.timeout = timeout
@@ -17,8 +32,8 @@ class CommandParameter(object):
 
         return self
 
-    def setFromStrings(self, strings, separator=";"):
-        commandLine, timeout, retry, backoff, delay = (strings.strip() + ";;;;").split(separator)[0:5]
+    def setFromStrings(self, strings):
+        commandLine, timeout, retry, backoff, delay = (strings.strip() + self.repeatedSeparator).split(self._separator)[0:5]
         return self.set(commandLine, int(timeout or "60"), int(retry or "3"), int(backoff or "0"), int(delay or "0"))
 
     def validate(self):
@@ -257,7 +272,7 @@ if __name__ == "__main__":
     print(finalResults)
 
     # Execute command list serial.
-    print("--- get all results summaries and details after execute command list serial. ---")
+    print("--- Get all results summaries and details after execute command list serial. ---")
     clse = CommandListSerialExecutor()
     finalResults = clse.execute(parameters)
     print(finalResults)
@@ -265,7 +280,7 @@ if __name__ == "__main__":
     print(clse.allResultsDetails)
 
     # Execute command list parallel.
-    print("--- get all results summaries and details after execute command list parallel. ---")
+    print("--- Get all results summaries and details after execute command list parallel. ---")
     clpe = CommandListParallelExecutor()
     finalResults = clpe.execute(parameters)
     print(finalResults)
