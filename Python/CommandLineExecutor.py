@@ -7,8 +7,13 @@ import time
 import json
 
 class CommandParameter(object):
+    defaultTimeout = 60
+    defaultRetry = 3
+    defaultBakcoff = 0
+    defaultDelay = 0
+
     def __init__(self):
-        self.separatorRepeatCount = 4
+        self.parameterCount = 5
         self.separator = ";"
 
     @property
@@ -19,26 +24,26 @@ class CommandParameter(object):
     def separator(self, separator):
         self._separator = separator
         self.repeatedSeparator = ""
-        for _ in range(self.separatorRepeatCount):
+        for _ in range(self.parameterCount - 1):
             self.repeatedSeparator += self._separator
 
-    def set(self, commandLine, timeout=60, retry=3, backoff=0, delay=0):
+    def set(self, commandLine, timeout = None, retry = None, backoff = None, delay = None):
         self.commandLine = commandLine
-        self.timeout = timeout
-        self.retry = retry
-        self.delay = delay
-        self.backoff = backoff
+        self.timeout = int(timeout) if timeout is not None else CommandParameter.defaultTimeout
+        self.retry = int(retry) if retry is not None else CommandParameter.defaultRetry
+        self.delay = int(delay) if delay is not None else CommandParameter.defaultBakcoff
+        self.backoff = int(backoff) if backoff is not None else CommandParameter.defaultDelay
 
         self.validate()
 
         return self
 
     def setFromStrings(self, strings):
-        commandLine, timeout, retry, backoff, delay = (strings.strip() + self.repeatedSeparator).split(self._separator)[0:5]
-        return self.set(commandLine, int(timeout or "60"), int(retry or "3"), int(backoff or "0"), int(delay or "0"))
+        commandLine, timeout, retry, backoff, delay = (strings.strip() + self.repeatedSeparator).split(self._separator)[0:self.parameterCount]
+        return self.set(commandLine, timeout or None, retry or None, backoff or None, delay or None)
 
     def getParameterStringsFromJsonElement(self, jsonElement, key):
-        return str(jsonElement[key]) if key in jsonElement else ""
+        return jsonElement[key] if key in jsonElement else None
 
     def setFromJsonElement(self, jsonElement):
         commandLine = self.getParameterStringsFromJsonElement(jsonElement, "commandLine")
@@ -46,8 +51,7 @@ class CommandParameter(object):
         retry = self.getParameterStringsFromJsonElement(jsonElement, "retry")
         backoff = self.getParameterStringsFromJsonElement(jsonElement, "backoff")
         delay = self.getParameterStringsFromJsonElement(jsonElement, "delay")
-        print(";".join([commandLine, timeout, retry, backoff, delay]))
-        return CommandParameter().setFromStrings(";".join([commandLine, timeout, retry, backoff, delay]))
+        return CommandParameter().set(commandLine, timeout, retry, backoff, delay)
 
     def validate(self):
         if not self.commandLine:
@@ -64,6 +68,9 @@ class CommandParameter(object):
 
         if self.backoff < 0:
             raise ValueError("Set backoff to positive value.")
+
+    def toString(self):
+        return self.separator.join([self.commandLine, str(self.timeout), str(self.retry), str(self.backoff), str(self.delay)])
 
 class CommandLineExecutor(object):
     def execute(self, parameter):
