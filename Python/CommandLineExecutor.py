@@ -4,6 +4,7 @@ import subprocess
 import multiprocessing
 import threading
 import time
+import json
 
 class CommandParameter(object):
     def __init__(self):
@@ -35,6 +36,18 @@ class CommandParameter(object):
     def setFromStrings(self, strings):
         commandLine, timeout, retry, backoff, delay = (strings.strip() + self.repeatedSeparator).split(self._separator)[0:5]
         return self.set(commandLine, int(timeout or "60"), int(retry or "3"), int(backoff or "0"), int(delay or "0"))
+
+    def getParameterStringsFromJsonElement(self, jsonElement, key):
+        return str(jsonElement[key]) if key in jsonElement else ""
+
+    def setFromJsonElement(self, jsonElement):
+        commandLine = self.getParameterStringsFromJsonElement(jsonElement, "commandLine")
+        timeout = self.getParameterStringsFromJsonElement(jsonElement, "timeout")
+        retry = self.getParameterStringsFromJsonElement(jsonElement, "retry")
+        backoff = self.getParameterStringsFromJsonElement(jsonElement, "backoff")
+        delay = self.getParameterStringsFromJsonElement(jsonElement, "delay")
+        print(";".join([commandLine, timeout, retry, backoff, delay]))
+        return CommandParameter().setFromStrings(";".join([commandLine, timeout, retry, backoff, delay]))
 
     def validate(self):
         if not self.commandLine:
@@ -89,7 +102,7 @@ class CommandListReader(object):
 
         return commandParameters
 
-class __CommandListExecutor(CommandLineExecutor):
+class ResultsCollector(object):
     def __init__(self):
         self.numOfcommandParameters = 0
         self._allResults = { 0: 0 }
@@ -102,14 +115,59 @@ class __CommandListExecutor(CommandLineExecutor):
 
     @property
     def allResults(self):
-        return self._allResults
+        return dict(self.__sortDictionary(self._allResults))
+
+    def clearResults(self):
+        self.numOfcommandParameters = 0
+        self._allResults = { 0: 0 }
+        self._allResultsDetails = {}
+
+    def collectResults(self, commandLine, returnCode):
+        self.lock.acquire()
+        self.numOfcommandParameters += 1
+        self._incrementDictionary(self._allResults, returnCode)
+        commandName = os.path.basename(commandLine.split()[0])
+        self._allResultsDetails[commandName] = returnCode
+        self.lock.release()
+
+    def __sortDictionary(self, dictionary, orderByKey=True, desending=False):
+        return sorted(dictionary.items(), key=lambda item:item[0 if orderByKey == True else 1], reverse=desending)
+
+    def _incrementDictionary(self, dictionary, key):
+        if key not in dictionary:
+            dictionary[key] = 1
+        else:
+            dictionary[key] = dictionary[key] + 1
+
+    def tallyingAllResults(self):
+        if self._allResults[0] == self.numOfcommandParameters:
+            return 0
+
+        allResultsWithoutZero = self._allResults.copy()
+        # delete key 0 always
+        del allResultsWithoutZero[0]
+
+        if self._allResults[0] == 0:
+            del self._allResults[0]
+
+        # If key value has non zero value , sort a dict by item value(this is counter).
+        sortedByValueDesc = self.__sortDictionary(allResultsWithoutZero, orderByKey=False, desending=True)
+        topOfCount = next(iter(sortedByValueDesc))[1]
+
+        # If item value is not unique, pick up more highly key value.
+        sortedByKeyDesc = self.__sortDictionary(allResultsWithoutZero, desending=True)
+        for key, value in sortedByKeyDesc:
+            if value == topOfCount:
+                return key
+
+class __CommandListExecutor(CommandLineExecutor, ResultsCollector):
+    def __init__(self):
+        self.clearResults()
+        self.lock = threading.Lock()
 
     def execute(self, parameter):
         returnCode = super().execute(parameter)
-        commandName = os.path.basename(parameter.commandLine.split(" ")[0])
-        self.lock.acquire()
-        self._allResultsDetails[commandName] = returnCode
-        self.lock.release()
+        self.collectResults(parameter.commandLine, returnCode)
 
         return returnCode
 
@@ -119,65 +177,27 @@ class __CommandListExecutor(CommandLineExecutor):
     def executeFromStringList(self, stringList):
         return self.execute(CommandListReader().readFromStringList(stringList))
 
-    def __sortDictionary(self, dictionary, sortByKey=True, reverse=False):
-        return sorted(dictionary.items(), key=lambda item:item[0 if sortByKey == True else 1], reverse=reverse)
-
-    def _incrementDictionary(self, dictionary, key):
-        if key not in dictionary:
-            dictionary[key] = 1
-        else:
-            dictionary[key] = dictionary[key] + 1
-
-    def _tallyingAllResults(self, allResults):
-        self._allResults = self.__sortDictionary(allResults)
-
-        if allResults[0] == self.numOfcommandParameters:
-            return 0
-
-        del allResults[0]
-
-        # If key value has non zero value , sort a dict by item value(this is counter).
-        sortedByValueDesc = self.__sortDictionary(allResults, sortByKey=False, reverse=True)
-        topOfCount = next(iter(sortedByValueDesc))[1]
-
-        # If item value is not unique, pick up more highly key value.
-        sortedByKeyDesc = self.__sortDictionary(allResults, reverse=True)
-        for key, value in sortedByKeyDesc:
-            if value == topOfCount:
-                return key
-
-class CommandListParallelExecutor(__CommandListExecutor):
+class CommandListParallelExecutor(__CommandListExecutor, ResultsCollector):
     def __init__(self):
-        self.numOfcommandParameters = 0
-        self._allResults = { 0: 0 }
-        self._allResultsDetails = {}
+        self.clearResults()
         self.lock = threading.Lock()
 
     def execute(self, commandParameters):
         if not commandParameters:
             raise ValueError("Command parameters not set.")
 
-        self.numOfcommandParameters = len(commandParameters)
-        self._allResults = { 0: 0 }
-
+        self.clearResults()
         with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-            allFutureResults = list(executor.map(super().execute, commandParameters))
+            list(executor.map(super().execute, commandParameters))
             executor.shutdown()
 
-        self._allResults = { 0: 0 }
-        for futureResults in list(allFutureResults):
-            self._incrementDictionary(self._allResults, futureResults)
-
-        return self._tallyingAllResults(self._allResults)
+        return self.tallyingAllResults()
 
 class CommandListSerialExecutor(__CommandListExecutor):
     def __init__(self):
-        self.numOfcommandParameters = 0
-        self._allResults = { 0: 0 }
-        self._allResultsDetails = {}
+        super().__init__()
         self.hasSetThreshouldOfError = False
         self._thresholdOfError = 0
-        self.lock = threading.Lock()
 
     @property
     def thresholdOfError(self, value):
@@ -195,23 +215,71 @@ class CommandListSerialExecutor(__CommandListExecutor):
         if not commandParameters:
             raise ValueError("Command parameters not set.")
 
-        self.numOfcommandParameters = len(commandParameters)
-
-        self._allResults = { 0: 0 }
+        super().clearResults()
         for index, parameter in enumerate(commandParameters):
             returnCode = super().execute(parameter)
-            self._incrementDictionary(self._allResults, returnCode)
             if self.__isDoStopAtError(returnCode):
                 print(f"Stop at {index + 1}, return code: {returnCode}, threshold: {self._thresholdOfError}.")
                 break
 
-        return self._tallyingAllResults(self._allResults)
+        return self.tallyingAllResults()
 
     def __isDoStopAtError(self, returnCode):
         if self.hasSetThreshouldOfError == False:
             return False
         
         return True if returnCode >= self._thresholdOfError or returnCode == -1 else False
+
+class BatchExecutor(ResultsCollector):
+    def __init__(self):
+        super().__init__()
+        self.hasSetThreshouldOfError = False
+        self._thresholdOfError = 0
+
+    @property
+    def thresholdOfError(self, value):
+        return self._thresholdOfError
+
+    @thresholdOfError.setter
+    def thresholdOfError(self, value):
+        if value < 0:
+            raise ValueError("Set threshold to greater than or equals 0.")
+
+        self.hasSetThreshouldOfError = True
+        self._thresholdOfError = value
+
+    def __isDoStopAtError(self, returnCode):
+        if self.hasSetThreshouldOfError == False:
+            return False
+        
+        return True if returnCode >= self._thresholdOfError or returnCode == -1 else False
+
+    def executeFromShallowJson(self, filename):
+        with open(filename) as file:
+            jsonCommandList = json.load(file)
+
+            self.clearResults()
+
+            for jsonKey, jsonElement in jsonCommandList.items():
+                returnCode = self.__executeFromJsonElement(jsonKey, jsonElement)
+                if self.__isDoStopAtError(returnCode):
+                    print(f"Stop at {jsonKey}, return code: {returnCode}, threshold: {self._thresholdOfError}.")
+                    break
+
+            return self.tallyingAllResults()
+
+    def __executeFromJsonElement(self, jsonKey, jsonElement):
+        if not type(jsonElement) is list:
+            returnCode = CommandLineExecutor().execute(CommandParameter().setFromJsonElement(jsonElement))
+        else:
+            commandList = []
+            for element in jsonElement:
+                commandList.append(CommandParameter().setFromJsonElement(element))
+
+            returnCode = CommandListParallelExecutor().execute(commandList)
+        self.collectResults(jsonKey, returnCode)
+
+        return returnCode
 
 if __name__ == "__main__":
     # Code exsamples
@@ -287,5 +355,14 @@ if __name__ == "__main__":
     print(clpe.allResults)
     print(clpe.allResultsDetails)
 
+    # You can execute batch job from shallow JSON.
+    filename = os.path.join("c:\\temp", "commandList.json")
+
+    print("--- Execute batch job from shallow JSON. ---")
+    be = BatchExecutor()
+    finalResults = be.executeFromShallowJson(filename)
+    print(finalResults)
+    print(be.allResults)
+    print(be.allResultsDetails)
 
     exit(0)
