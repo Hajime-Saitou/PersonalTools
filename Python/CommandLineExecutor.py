@@ -38,19 +38,19 @@ class CommandParameter(object):
 
         return self
 
-    def setFromStrings(self, strings):
-        commandLine, timeout, retry, backoff, delay = (strings.strip() + self.repeatedSeparator).split(self._separator)[0:self.parameterCount]
+    def setFromString(self, string):
+        commandLine, timeout, retry, backoff, delay = (string.strip() + self.repeatedSeparator).split(self._separator)[0:self.parameterCount]
         return self.set(commandLine, timeout or None, retry or None, backoff or None, delay or None)
 
-    def getParameterStringsFromJsonElement(self, jsonElement, key):
+    def getParameterStringFromJsonElement(self, jsonElement, key):
         return jsonElement[key] if key in jsonElement else None
 
     def setFromJsonElement(self, jsonElement):
-        commandLine = self.getParameterStringsFromJsonElement(jsonElement, "commandLine")
-        timeout = self.getParameterStringsFromJsonElement(jsonElement, "timeout")
-        retry = self.getParameterStringsFromJsonElement(jsonElement, "retry")
-        backoff = self.getParameterStringsFromJsonElement(jsonElement, "backoff")
-        delay = self.getParameterStringsFromJsonElement(jsonElement, "delay")
+        commandLine = self.getParameterStringFromJsonElement(jsonElement, "commandLine")
+        timeout = self.getParameterStringFromJsonElement(jsonElement, "timeout")
+        retry = self.getParameterStringFromJsonElement(jsonElement, "retry")
+        backoff = self.getParameterStringFromJsonElement(jsonElement, "backoff")
+        delay = self.getParameterStringFromJsonElement(jsonElement, "delay")
         return CommandParameter().set(commandLine, timeout, retry, backoff, delay)
 
     def validate(self):
@@ -89,8 +89,8 @@ class CommandLineExecutor(object):
 
         return -1
 
-    def executeFromStrings(self, strings):
-        return self.execute(CommandParameter().setFromStrings(strings))
+    def executeFromString(self, string):
+        return self.execute(CommandParameter().setFromString(string))
 
 class CommandListReader(object):
     def readFromFile(self, filename, encoding='shift-jis'):
@@ -105,7 +105,7 @@ class CommandListReader(object):
         commandParameters = []
 
         for string in stringList:
-            commandParameters.append(CommandParameter().setFromStrings(string))
+            commandParameters.append(CommandParameter().setFromString(string))
 
         return commandParameters
 
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     # Code exsamples
     parameters = [
         CommandParameter().set("echo hoge", 10, 3),
-        CommandParameter().setFromStrings("timeout /t 3 /nobreak > nul;1;5")
+        CommandParameter().setFromString("timeout /t 3 /nobreak > nul;1;5")
     ]
 
     # Execute command line single.
@@ -334,8 +334,8 @@ if __name__ == "__main__":
         "timeout /t 3 /nobreak > nul;1;5"
     ]
 
-    print("--- Execute command line from strings. ---")
-    finalResults = CommandLineExecutor().executeFromStrings(parameterList[0])
+    print("--- Execute command line from string. ---")
+    finalResults = CommandLineExecutor().executeFromString(parameterList[0])
     print(finalResults)
 
     print("--- Execute command list serial from string list. ---")
