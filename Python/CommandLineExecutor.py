@@ -94,12 +94,8 @@ class CommandLineExecutor(object):
 
 class CommandListReader(object):
     def readFromFile(self, filename, encoding='shift-jis'):
-        commandParameters = []
-
         with open(filename, mode='r', encoding=encoding) as f:
             return self.readFromStringList(f.readlines())
-
-        return commandParameters
 
     def readFromStringList(self, stringList):
         commandParameters = []
