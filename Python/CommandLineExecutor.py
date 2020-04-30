@@ -42,15 +42,15 @@ class CommandParameter(object):
         commandLine, timeout, retry, backoff, delay = (string.strip() + self.repeatedSeparator).split(self._separator)[0:self.parameterCount]
         return self.set(commandLine, timeout or None, retry or None, backoff or None, delay or None)
 
-    def getParameterStringFromJsonElement(self, jsonElement, key):
-        return jsonElement[key] if key in jsonElement else None
+    def getParameterStringFromJsonValue(self, jsonValue, childKey):
+        return jsonValue[childKey] if childKey in jsonValue else None
 
-    def setFromJsonElement(self, jsonElement):
-        commandLine = self.getParameterStringFromJsonElement(jsonElement, "commandLine")
-        timeout = self.getParameterStringFromJsonElement(jsonElement, "timeout")
-        retry = self.getParameterStringFromJsonElement(jsonElement, "retry")
-        backoff = self.getParameterStringFromJsonElement(jsonElement, "backoff")
-        delay = self.getParameterStringFromJsonElement(jsonElement, "delay")
+    def setFromJsonValue(self, jsonValue):
+        commandLine = self.getParameterStringFromJsonValue(jsonValue, "commandLine")
+        timeout = self.getParameterStringFromJsonValue(jsonValue, "timeout")
+        retry = self.getParameterStringFromJsonValue(jsonValue, "retry")
+        backoff = self.getParameterStringFromJsonValue(jsonValue, "backoff")
+        delay = self.getParameterStringFromJsonValue(jsonValue, "delay")
         return CommandParameter().set(commandLine, timeout, retry, backoff, delay)
 
     def validate(self):
@@ -263,21 +263,22 @@ class BatchExecutor(ResultsCollector):
 
             self.clearResults()
 
-            for jsonKey, jsonElement in jsonCommandList.items():
-                returnCode = self.__executeFromJsonElement(jsonKey, jsonElement)
+            for jsonItem in jsonCommandList.items():
+                returnCode = self.__executeFromJsonItem(jsonItem)
                 if self.__isDoStopAtError(returnCode):
-                    print(f"Stop at {jsonKey}, return code: {returnCode}, threshold: {self._thresholdOfError}.")
+                    print(f"Stop at {jsonItem[0]}, return code: {returnCode}, threshold: {self._thresholdOfError}.")
                     break
 
             return self.tallyingAllResults()
 
-    def __executeFromJsonElement(self, jsonKey, jsonElement):
-        if not type(jsonElement) is list:
-            returnCode = CommandLineExecutor().execute(CommandParameter().setFromJsonElement(jsonElement))
+    def __executeFromJsonItem(self, jsonItem):
+        jsonKey, jsonValue = jsonItem
+        if not type(jsonValue) is list:
+            returnCode = CommandLineExecutor().execute(CommandParameter().setFromJsonValue(jsonValue))
         else:
             commandList = []
-            for element in jsonElement:
-                commandList.append(CommandParameter().setFromJsonElement(element))
+            for value in jsonValue:
+                commandList.append(CommandParameter().setFromJsonValue(value))
 
             returnCode = CommandListParallelExecutor().execute(commandList)
         self.collectResults(jsonKey, returnCode)
